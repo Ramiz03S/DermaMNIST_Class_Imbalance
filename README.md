@@ -5,7 +5,7 @@ Before studying diffusion-based augmentation for class imbalance on DermaMNIST, 
 | Part | Goal | Notebook | 
 |:---:|---|:---:|
 | **A** | ResNet-18 on DermaMNIST | [![Notebook](https://img.shields.io/badge/Notebook-milestone1__a-2b3137?style=for-the-badge&logo=jupyter&logoColor=F37626)](milestone1_a.ipynb) | 
-| **B** | DDIM sampling and FID on CIFAR-10 | [![Notebook](https://img.shields.io/badge/Notebook-milestone1__b-2b3137?style=for-the-badge&logo=jupyter&logoColor=F37626)](ddim_paper_milestone1_b.ipynb) | 
+| **B** | DDIM sampling and FID on CIFAR-10 | [![Notebook](https://img.shields.io/badge/Notebook-milestone1__b-2b3137?style=for-the-badge&logo=jupyter&logoColor=F37626)](milestone1_b.ipynb) | 
 
 **Summary**
 
