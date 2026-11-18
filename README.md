@@ -153,3 +153,87 @@ Runs the DDIM sampler, walking the timestep sequence from high noise to low. At 
 fid.compute_fid(folder, dataset_name="cifar10", dataset_res=32, dataset_split="train", mode=mode)
 Runs every image in the folder through an Inception network and fits a Gaussian to the features. It then computes the FID to the precomputed CIFAR-10 train statistics. mode="clean" uses antialiased PyTorch resizing. mode="legacy_tensorflow" uses the original TF pipeline, so that number is the one comparable to the paper's.
 
+
+
+# Milestone 2: Improve
+
+DermaMNIST is highly imbalanced: nv makes up 67% of the training set, while df has only 80 images and vasc 99. In this milestone we train a class-conditional diffusion model on the training split, use it to generate extra images for the minority classes, and compare these images with two standard fixes for class imbalance: class-weighted loss and oversampling.
+
+| Part | Goal | Notebook |
+|:---:|---|:---:|
+| 1 | Train a class-conditional diffusion model and generate 1,000 images for each class except nv | [![Notebook](https://img.shields.io/badge/Notebook-milestone2__1-2b3137?style=for-the-badge&logo=jupyter&logoColor=F37626)](milestone2_1.ipynb) |
+| 2 | Retrain the ResNet-18 classifier with the generated images and compare with class-weighted loss and oversampling | [![Notebook](https://img.shields.io/badge/Notebook-milestone2__2-2b3137?style=for-the-badge&logo=jupyter&logoColor=F37626)](milestone2_2.ipynb) |
+
+Summary
+
+| Arm | Test AUC | Test ACC | Balanced ACC | Macro-F1 | Rare-class recall |
+|---|---|---|---|---|---|
+| Baseline | 0.918 ± 0.002 | 0.741 ± 0.007 | 0.455 ± 0.042 | 0.477 ± 0.027 | 0.370 ± 0.070 |
+| Class-weighted loss | 0.902 ± 0.003 | 0.607 ± 0.024 | 0.558 ± 0.007 | 0.450 ± 0.024 | 0.528 ± 0.013 |
+| Oversampling | 0.892 ± 0.003 | 0.683 ± 0.073 | 0.511 ± 0.055 | 0.498 ± 0.028 | 0.474 ± 0.094 |
+| Synthetic | 0.914 ± 0.004 | 0.733 ± 0.007 | 0.515 ± 0.013 | 0.502 ± 0.003 | 0.501 ± 0.020 |
+
+Mean ± standard deviation over 3 seeds on the real test set. Rare-class recall is the mean recall of akiec, bcc, df and vasc.
+
+Both notebooks were run on Colab with a T4 GPU and save their outputs to `MyDrive/deep_learning_project/Milestone_2/`. Part 1 must be run before Part 2.
+
+---
+
+## Part 1: Class-conditional diffusion model
+
+Trains a diffusion model on the DermaMNIST training split (7,007 images, 28x28) and generates extra images for every class except nv.
+
+### Method
+
+- Model: class-conditional U-Net from `diffusers` with 6.47 million parameters, three levels with 64, 128 and 128 channels, and attention at 14x14 and in the middle block.
+- Diffusion: 1,000 steps with a linear noise schedule from 0.0001 to 0.02. The model predicts the added noise.
+- Training: 40,000 steps, batch size 128, Adam with learning rate 2e-4 and 1,000 warm-up steps, mixed precision, gradient clipping at 1.0, and an EMA of the weights with decay 0.9995. Each label is replaced by a null label with probability 0.1, as classifier-free guidance requires.
+- Generation: EMA weights from step 40,000, the DDIM sampler from Milestone 1 (50 quadratic steps, eta = 0) and guidance strength w = 0.3.
+
+### Results
+
+- Training took 2.42 GPU-hours. The average loss fell from 0.248 over the first 500 steps to 0.0098 over the last 500 steps.
+- The final pool, `synthetic_pool_w0.3.npz`, holds 6,000 images in the same format as the real data: 1,000 each for akiec, bcc, bkl, df, mel and vasc, with no exact duplicates.
+
+---
+
+## Part 2: Retraining the classifier
+
+Retrains the Milestone 1 classifier in four setups ("arms") that differ in one thing only:
+
+| Arm | What changes |
+|---|---|
+| Baseline | Nothing |
+| Class-weighted loss | Cross-entropy with class weights inversely proportional to class size |
+| Oversampling | Training images drawn with probability inversely proportional to their class size |
+| Synthetic | Every class except nv topped up to 1,000 training images with generated images |
+
+### Method
+
+- Classifier: the ResNet-18 and settings of Milestone 1, with inputs in [-1, 1], Adam with learning rate 1e-3, batch size 128, the learning rate divided by 10 at 50% and 75% of training, and no augmentation. The checkpoint with the best validation AUC is evaluated on the test set.
+- Compute: every arm gets the same 5,500 gradient steps (100 epochs of 55 steps), so the larger synthetic training set gets no extra compute.
+- Synthetic data: the synthetic arm adds 3,686 generated images (akiec 772, bcc 641, bkl 231, df 920, mel 221, vasc 901), for 10,693 training images in total.
+- Evaluation: the validation and test sets contain only real images. Each arm is trained with seeds 0, 1 and 2.
+
+### Results
+
+Per-class test recall, mean over 3 seeds (test images per class in brackets):
+
+| Arm | akiec (66) | bcc (103) | bkl (220) | df (23) | mel (223) | nv (1341) | vasc (29) |
+|---|---|---|---|---|---|---|---|
+| Baseline | 0.369 | 0.456 | 0.412 | 0.101 | 0.384 | 0.910 | 0.552 |
+| Class-weighted loss | 0.364 | 0.495 | 0.452 | 0.507 | 0.709 | 0.635 | 0.747 |
+| Oversampling | 0.394 | 0.492 | 0.382 | 0.333 | 0.501 | 0.797 | 0.678 |
+| Synthetic | 0.535 | 0.414 | 0.391 | 0.319 | 0.306 | 0.901 | 0.736 |
+
+- Baseline: our training loop reproduces Milestone 1, with test AUC 0.918 and ACC 0.741 against 0.914 and 0.740 in Milestone 1.
+- Synthetic: rare-class recall rises from 0.370 to 0.501 and balanced accuracy from 0.455 to 0.515, while ACC (0.733) and AUC (0.914) stay close to the baseline. This arm has the highest macro-F1 (0.502). Recall rises for akiec, df and vasc, and falls for bcc, bkl, mel and nv.
+- Class-weighted loss: this arm has the highest balanced accuracy (0.558) and rare-class recall (0.528), but ACC falls by 13 points to 0.607 because nv recall drops from 0.910 to 0.635. It also has the lowest macro-F1 (0.450).
+- Oversampling: this arm has the lowest AUC (0.892), scores below the synthetic arm on all five metrics, and varies most between seeds on ACC, balanced accuracy and rare-class recall.
+
+### Limitations
+
+- The original DermaMNIST split is used, not the 2024 audit-corrected one.
+- Only one synthetic amount (top-up to 1,000) and one guidance value (w = 0.3) are tested. Their effects are left to Milestone 3.
+- There are only 3 seeds per arm and 23 to 103 test images per rare class, so small differences are unreliable. The synthetic arm's gains in rare-class recall and balanced accuracy are each less than twice the baseline's standard deviation across seeds.
+
